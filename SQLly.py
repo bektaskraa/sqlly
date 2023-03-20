@@ -19,7 +19,9 @@ class SQL:
     def __event(self,e):
         if SHOW_EVENT: print(Fore.BLUE + Style.BRIGHT + "SQL Event: " + Style.RESET_ALL + Fore.BLUE + e + Style.RESET_ALL)
     def __init__(self,host,username,password,db):
-        self.connect(host, username, password, db)
+        self.host = host
+        self.db = db
+        self.conn = self.connect(host, username, password, db)
     def connect(self,host,username,password,db):
         try:
             self.connection = mysql.connector.connect(host=host,user=username,password=password,database=db)
@@ -33,6 +35,7 @@ class SQL:
         else:
             self.__error('Could not connect to database!')
         return False
+
     def __jsonData(self,table,rows,header=True):
         if header == True:
             query = f"SELECT DISTINCT column_name FROM information_schema.columns WHERE table_name = '{table}'"
@@ -50,6 +53,7 @@ class SQL:
                     index += 1
             clearData.append(data)
         return clearData
+
     def get(self,table,select="*",sort=None,limit=None,clear=True):
 
         if not select == '*' and not isinstance(select,str):
@@ -116,13 +120,150 @@ class SQL:
         else:
             return self.__jsonData(table,self.cursor.fetchall())
 
+    def insert(self,table,data:dict):
+        for i in data:
+            if isinstance(data[i],str):data[i] = f"'{data[i]}'"
+            if data[i] == None:data[i] = f"NULL"
+        query = f"INSERT INTO {table} ("
+        index = 0
+        for i in data.keys():
+            query += f"{i}"
+            if index < len(data.keys())-1:
+                query += ","
+            index +=1
+        query += ") VALUES ("
+        index = 0
+        for i in data:
+            query += f"{data[i]}"
+            if index < len(data)-1:
+                query += ","
+            index +=1
+        query += ")"
+        self.__event(query)
+        self.cursor.execute(query)
+        self.connection.commit()
+
+    def update(self,table,select:dict,data:dict):
+        for i in data:
+            if isinstance(data[i],str):data[i] = f"'{data[i]}'"
+        for i in select:
+            if isinstance(select[i], str): select[i] = f"'{select[i]}'"
+        query = f"UPDATE {table} SET "
+        index = 0
+        for i in data:
+            query += f"{i} = {data[i]}"
+            if index < len(data)-1:
+                query += ","
+            index +=1
+        query += " WHERE "
+        index = 0
+        for i in select:
+            query += f"{i} = {select[i]}"
+            if index < len(select)-1:
+                query += ","
+            index +=1
+        self.__event(query)
+        self.cursor.execute(query)
+        self.connection.commit()
+
+    def remove(self,table,select:dict):
+        for i in select:
+            if isinstance(select[i], str): select[i] = f"'{select[i]}'"
+        query = f"DELETE FROM {table} WHERE "
+        index = 0
+        for i in select:
+            query += f"{i} = {select[i]}"
+            if index < len(select) - 1:
+                query += ","
+            index += 1
+        self.__event(query)
+        self.cursor.execute(query)
+        self.connection.commit()
+
+    def duplicate(self,table,select,to:str,avoidColumn=None,replaceColumn=None):
+        data = self.get(table,sort=select)
+        if len(data) <= 0:
+            self.__error("Selected data to duplicate could not be found!")
+        else:
+            self.__event(f"Data '{str(data[0])}' selected to duplicate to table '{to}'")
+            print(replaceColumn)
+            if not avoidColumn == None:
+                for i in data[0]:
+                    for x in avoidColumn:
+                        if i == x:
+                            data[0][i] = None
+            if not replaceColumn == None:
+                for i in data[0]:
+                    for x in replaceColumn:
+                        for y in x:
+                            if i == y:
+                                data[0][i] = x[y]
+            self.insert(to,data[0])
+
+    def addRows(self,table,datas:list):
+        for i in datas:
+            self.insert(table,i)
+
+    def removeRows(self,table,datas:list):
+        for i in datas:
+            self.remove(table,i)
+
+    def existTable(self,table):
+        query = f"SHOW TABLES LIKE '{table}'"
+        self.cursor.execute(query)
+        result = self.cursor.fetchone()
+        self.__event(query)
+        if result:
+            self.__event(f"There is table '{table}'")
+            return True
+        else:
+            self.__event(f"Cannot find table '{table}'")
+            return False
+
+    def createTable(self,table, cols ):
+        query = f"CREATE TABLE {table}("
+        index = 0
+        for col in cols:
+            if len(col) >= 3:
+                if str(col[2]).lower() == "auto" or str(col[2]).lower() == "key":
+                    query += f"{col[0]} {col[1]} AUTO_INCREMENT PRIMARY KEY"
+                else:
+                    query += f"{col[0]} {col[1]} {col[3]}"
+            else:
+                query += f"{col[0]} {col[1]}"
+            if index < len(cols) - 1:
+                query += ","
+            index += 1
+        query+=");"
+        self.__event(query)
+        try:
+            self.cursor.execute(query)
+            self.__event(f"Table '{table}' has been successfully created in database '{self.db}'!")
+        except mysql.connector.errors.ProgrammingError as error:
+            if error.errno == 1050:
+                self.__error(f"Table creation denied. There is already a table named '{table}'!")
+            else:
+                self.__error(f"{error}")
+        return table
+
 class Table:
     def __init__(self,connect,table):
         self.table = table
         self.connect = connect
     def get(self,select="*",sort=None,limit=None,clear=True):
         return self.connect.get(self.table,select,sort,limit,clear)
-
+    def remove(self,select:dict):
+        return self.connect.remove(self.table,select)
+    def insert(self,data:dict):
+        return self.connect.insert(self.table,data)
+    def update(self,select:dict,data:dict):
+        return self.connect.update(self.table,select,data)
+    def duplicate(self,select,to:str,avoidColumn=None,replaceColumn=None):
+        return self.connect.duplicate(self.table,select,to,avoidColumn,replaceColumn)
+    def addRows(self,datas:list):
+        return self.connect.addRows(self.table,datas)
+    def removeRows(self,datas:list):
+        return self.connect.removeRows(self.table, datas)
 def sort(col,value,process='=',valType=str,AndOr='AND'):
     if isinstance(valType, str) and isinstance(value, tuple) and process.upper() == "IN": valType = tuple
     if isinstance(value, str):
@@ -139,4 +280,3 @@ def sort(col,value,process='=',valType=str,AndOr='AND'):
         return (col,value,process)
     if AndOr.upper() == 'OR':
         return [col,value,process]
-
