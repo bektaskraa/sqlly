@@ -1,4 +1,6 @@
 import mysql.connector
+import psycopg2
+import sqlite3
 from colorama import Fore, Back, Style
 
 SHOW_ERROR = False
@@ -18,23 +20,41 @@ class SQL:
         if SHOW_ERROR: print(Fore.RED + Style.BRIGHT + "SQL Error: " + Style.RESET_ALL + Fore.RED + e + Style.RESET_ALL)
     def __event(self,e):
         if SHOW_EVENT: print(Fore.BLUE + Style.BRIGHT + "SQL Event: " + Style.RESET_ALL + Fore.BLUE + e + Style.RESET_ALL)
-    def __init__(self,host,username,password,db):
+    def __init__(self,host,username,password,db,driver="mysql"):
         self.host = host
         self.db = db
-        self.conn = self.connect(host, username, password, db)
-    def connect(self,host,username,password,db):
-        try:
-            self.connection = mysql.connector.connect(host=host,user=username,password=password,database=db)
-        except mysql.connector.errors.ProgrammingError as e:
-            self.__error(f"Unknown database '{db}'")
-            return False
-        if self.connection.is_connected():
-            self.cursor = self.connection.cursor()
-            self.__event(f"Connection to '{db}' is successful.")
-            return True
+        self.driver = driver
+        self.connect(host, username, password, db,driver)
+    def connect(self,host, username, password, db, driver="mysql"):
+        if driver == "mysql":
+            try:
+                try:
+                    self.connection = mysql.connector.connect(host=host, user=username, password=password, database=db)
+                except mysql.connector.errors.ProgrammingError as e:
+                    self.__error(f"Unknown database '{db}'")
+                    return False
+                self.__event(f"Connected to MySQL database '{db}'")
+            except mysql.connector.Error as e:
+                self.__error(f"Error connecting to MySQL database: {e}")
+                return False
+        elif driver == "postgresql":
+            try:
+                self.connection = psycopg2.connect(host=host, user=username, password=password, dbname=db)
+                self.__event(f"Connected to PostgreSQL database '{db}'")
+            except psycopg2.Error as e:
+                self.__error(f"Error connecting to PostgreSQL database: {e}")
+                return None, None
+        elif driver == "sqlite":
+            try:
+                self.connection = sqlite3.connect(db)
+                self.__event(f"Connected to SQLite database '{db}'")
+            except sqlite3.Error as e:
+                self.__error(f"Error connecting to SQLite database: {e}")
         else:
-            self.__error('Could not connect to database!')
-        return False
+            self.__error(f"Unknown database driver: {driver}")
+            return False
+        self.cursor = self.connection.cursor()
+        return True
 
     def __jsonData(self,table,rows,header=True):
         if header == True:
@@ -209,16 +229,19 @@ class SQL:
             self.remove(table,i)
 
     def existTable(self,table):
-        query = f"SHOW TABLES LIKE '{table}'"
-        self.cursor.execute(query)
-        result = self.cursor.fetchone()
-        self.__event(query)
-        if result:
-            self.__event(f"There is table '{table}'")
-            return True
+        if self.driver.lower() in ['mysql','postgresql']:
+            query = f"SHOW TABLES LIKE '{table}'"
+            self.cursor.execute(query)
+            result = self.cursor.fetchone()
+            self.__event(query)
+            if result:
+                self.__event(f"There is table '{table}'")
+                return True
+            else:
+                self.__event(f"Cannot find table '{table}'")
+                return False
         else:
-            self.__event(f"Cannot find table '{table}'")
-            return False
+            self.__error(f'{self.driver} not supported existTable() function!')
 
     def createTable(self,table, cols ):
         query = f"CREATE TABLE {table}("

@@ -13,7 +13,8 @@ pip install SQLly
 To use SQLly, first import it:
 
 ```python
-import SQLly
+
+from SQLly import SQLly
 ```
 
 ### Connecting to a Database
